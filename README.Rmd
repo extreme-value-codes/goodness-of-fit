@@ -15,16 +15,23 @@ dir.create("figures", showWarnings = FALSE)
 source("R/00_data.R")
 source("R/01_fit_models.R")
 source("R/03_gof_summary.R")
+library(kableExtra)
+
+# p-value formatting helpers: "<0.001" for tiny values, bold when significant at 0.05
+fmt_p <- function(p, digits = 3)
+  ifelse(p < 0.001, "<0.001", formatC(p, format = "f", digits = digits))
+bold_sig <- function(p, txt) ifelse(p < 0.05, cell_spec(txt, "html", bold = TRUE), txt)
 ```
 
 # Overview
 
-This repository contains the R code for the Venice sea-level analysis in *[Publication title]*. It fits the **r largest order statistics** model to annual Venice sea levels (`r N` years, `r min(years)`--`r max(years)`, 10 largest values per year), compares models with likelihood ratio tests, and applies a new **parametric-bootstrap goodness-of-fit routine**, `rlarg.test()`, to each order statistic.
+This repository contains the R code for the Venice sea-level analysis in \textit{Goodness of Fit for the r-Largest Order Statistics Method in
+Extreme Value Theory}. It fits the **r largest order statistics** model to annual Venice sea levels (`r N` years, `r min(years)`--`r max(years)`, 10 largest values per year), compares models with likelihood ratio tests, and applies a new **parametric-bootstrap goodness-of-fit routine**, `rlarg.test()`, to each order statistic.
 
 # Repository structure
 
 | File | Purpose |
-|-----------------------------|-------------------------------------------|
+|------------------------------------|------------------------------------|
 | `R/00_data.R` | Loads and prepares the Venice data |
 | `R/01_fit_models.R` | Fits models 1--5, likelihood ratio tests, fitted curves |
 | `R/rlarg_test.R` | The `rlarg.test()` goodness-of-fit function |
@@ -35,7 +42,7 @@ This repository contains the R code for the Venice sea-level analysis in *[Publi
 
 # Reproducing the results
 
-Run everything from the repository root. Required packages: `ismev`, `dplyr` (plus `knitr` and `rmarkdown` to rebuild this file).
+Run everything from the repository root. Required packages: `ismev`, `dplyr` (plus `knitr`, `rmarkdown` and `kableExtra` to rebuild this file).
 
 ``` r
 source("R/00_data.R")          # data
@@ -50,18 +57,39 @@ Rscript R/02_gof_bootstrap.R 501    # writes results/Results501.txt; repeat for 
 
 Then `source("R/03_gof_summary.R")` averages the files in `results/`. To rebuild this page: `rmarkdown::render("README.Rmd")`.
 
+# Data
+
+Annual Venice sea levels: the 10 largest values (cm) in each year. The bold line is the annual maximum (order statistic 1).
+
+```{r data-plot, fig.width=7, fig.height=5}
+matplot(years, as.matrix(V2), type = "l", lty = 1, col = grey.colors(10, end = 0.7),
+        xlab = "Year", ylab = "Sea level (cm)")
+lines(years, V2[, 1], lwd = 2)
+legend("topleft", legend = c("Annual maximum", "Order statistics 2-10"),
+       lwd = c(2, 1), col = c("black", "grey50"), bty = "n")
+```
+
 # Results
 
 ## Likelihood ratio tests
 
 ```{r lrt}
-knitr::kable(tab_lrt)
+lrt <- tab_lrt
+lrt$`p-value` <- ifelse(lrt$`p-value` < 0.05, paste0("**", fmt_p(lrt$`p-value`), "**"), fmt_p(lrt$`p-value`))
+knitr::kable(lrt, align = c("l", "r", "c", "r"),
+             caption = "Each row tests a larger model against its simpler counterpart. Bold: p < 0.05.")
 ```
 
 ## Parameter estimates (Model 2: linear trend)
 
 ```{r params}
-knitr::kable(tab_params)
+pt <- data.frame(Parameter = c("μ, intercept (cm)", "μ, trend (cm/year)", "σ (cm)", "ξ"),
+                 Estimate = formatC(tab_params[, 1], format = "f", digits = 3),
+                 `Std. error` = formatC(tab_params[, 2], format = "f", digits = 3),
+                 z = formatC(tab_params[, 3], format = "f", digits = 2),
+                 `p-value` = fmt_p(tab_params[, 4]),
+                 check.names = FALSE)
+knitr::kable(pt, align = c("l", "r", "r", "r", "r"))
 ```
 
 ## Fitted annual-maximum curves
@@ -80,8 +108,15 @@ legend("topleft", legend = c("Model 2 (linear)", "Model 3 (quadratic)", "Model 5
 
 Bootstrap p-values (averaged over runs) for the correlation (R), Kolmogorov--Smirnov (KS), Cramér--von Mises (CvM) and Anderson--Darling (AD) statistics, for each order statistic *k*. Models 7, 8 and 9 have constant, linear-trend, and linear-trend + 11-year-cycle location parameters.
 
-```{r gof-table, eval=!is.null(gof_tab)}
-knitr::kable(gof_tab, align = "c")
+```{r gof-table, eval=!is.null(gof_avg)}
+cells <- do.call(cbind, lapply(gof_avg, function(m)
+  matrix(bold_sig(m, formatC(m, format = "f", digits = 2)), nrow = 10)))
+gt <- data.frame(k = 1:10, cells, check.names = FALSE)
+kbl(gt, format = "html", escape = FALSE, align = "c",
+    col.names = c("k", rep(c("R", "KS", "CvM", "AD"), 3)),
+    caption = "Averaged bootstrap p-values. Bold: p < 0.05.") %>%
+  add_header_above(c(" " = 1, "Model 7: constant" = 4,
+                     "Model 8: linear trend" = 4, "Model 9: trend + 11-yr cycle" = 4))
 ```
 
 ```{r gof-plot, eval=!is.null(gof_avg), fig.width=9, fig.height=4}
@@ -92,10 +127,6 @@ for (nmod in names(gof_avg)) {
   abline(h = 0.05, lty = 2)
 }
 legend("bottomright", legend = c("R", "KS", "CvM", "AD"), pch = 1:4, col = 1:4, lty = 1, bty = "n", cex = 0.8)
-```
-
-```{r gof-missing, eval=is.null(gof_tab)}
-cat("No bootstrap results found in results/. Run R/02_gof_bootstrap.R first.")
 ```
 
 # Citation

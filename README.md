@@ -5,6 +5,7 @@ Sea Levels
 - [Overview](#overview)
 - [Repository structure](#repository-structure)
 - [Reproducing the results](#reproducing-the-results)
+- [Data](#data)
 - [Results](#results)
   - [Likelihood ratio tests](#likelihood-ratio-tests)
   - [Parameter estimates (Model 2: linear
@@ -17,11 +18,11 @@ Sea Levels
 # Overview
 
 This repository contains the R code for the Venice sea-level analysis in
-*\[Publication title\]*. It fits the **r largest order statistics**
-model to annual Venice sea levels (51 years, 1931–1981, 10 largest
-values per year), compares models with likelihood ratio tests, and
-applies a new **parametric-bootstrap goodness-of-fit routine**,
-`rlarg.test()`, to each order statistic.
+. It fits the **r largest order statistics** model to annual Venice sea
+levels (51 years, 1931–1981, 10 largest values per year), compares
+models with likelihood ratio tests, and applies a new
+**parametric-bootstrap goodness-of-fit routine**, `rlarg.test()`, to
+each order statistic.
 
 # Repository structure
 
@@ -38,7 +39,8 @@ applies a new **parametric-bootstrap goodness-of-fit routine**,
 # Reproducing the results
 
 Run everything from the repository root. Required packages: `ismev`,
-`dplyr` (plus `knitr` and `rmarkdown` to rebuild this file).
+`dplyr` (plus `knitr`, `rmarkdown` and `kableExtra` to rebuild this
+file).
 
 ``` r
 source("R/00_data.R")          # data
@@ -56,25 +58,35 @@ Rscript R/02_gof_bootstrap.R 501    # writes results/Results501.txt; repeat for 
 Then `source("R/03_gof_summary.R")` averages the files in `results/`. To
 rebuild this page: `rmarkdown::render("README.Rmd")`.
 
+# Data
+
+Annual Venice sea levels: the 10 largest values (cm) in each year. The
+bold line is the annual maximum (order statistic 1).
+
+![](figures/data-plot-1.png)<!-- -->
+
 # Results
 
 ## Likelihood ratio tests
 
-| Comparison              | Deviance |  df |  p-value |
-|:------------------------|---------:|----:|---------:|
-| 2 vs 1 (linear trend)   |  110.062 |   1 | 0.00e+00 |
-| 3 vs 2 (quadratic term) |    0.655 |   1 | 4.18e-01 |
-| 4 vs 2 (18.62-yr cycle) |    8.096 |   2 | 1.75e-02 |
-| 5 vs 2 (11-yr cycle)    |   18.500 |   2 | 9.61e-05 |
+| Comparison              | Deviance | df  |     p-value |
+|:------------------------|---------:|:---:|------------:|
+| 2 vs 1 (linear trend)   |  110.062 |  1  | **\<0.001** |
+| 3 vs 2 (quadratic term) |    0.655 |  1  |       0.418 |
+| 4 vs 2 (18.62-yr cycle) |    8.096 |  2  |   **0.018** |
+| 5 vs 2 (11-yr cycle)    |   18.500 |  2  | **\<0.001** |
+
+Each row tests a larger model against its simpler counterpart. Bold: p
+\< 0.05.
 
 ## Parameter estimates (Model 2: linear trend)
 
-|                | Estimate | Std. error |       z | p-value |
-|:---------------|---------:|-----------:|--------:|--------:|
-| mu (intercept) | 104.5199 |     1.6672 | 62.6935 |  0.0000 |
-| mu (trend)     |   0.4816 |     0.0410 | 11.7579 |  0.0000 |
-| sigma          |  11.7392 |     0.6414 | 18.3028 |  0.0000 |
-| xi             |  -0.0653 |     0.0275 | -2.3702 |  0.0178 |
+|                | Parameter          | Estimate | Std. error |     z | p-value |
+|:---------------|:-------------------|---------:|-----------:|------:|--------:|
+| mu (intercept) | μ, intercept (cm)  |  104.520 |      1.667 | 62.69 | \<0.001 |
+| mu (trend)     | μ, trend (cm/year) |    0.482 |      0.041 | 11.76 | \<0.001 |
+| sigma          | σ (cm)             |   11.739 |      0.641 | 18.30 | \<0.001 |
+| xi             | ξ                  |   -0.065 |      0.028 | -2.37 |   0.018 |
 
 ## Fitted annual-maximum curves
 
@@ -87,8 +99,6 @@ Kolmogorov–Smirnov (KS), Cramér–von Mises (CvM) and Anderson–Darling
 (AD) statistics, for each order statistic *k*. Models 7, 8 and 9 have
 constant, linear-trend, and linear-trend + 11-year-cycle location
 parameters.
-
-    ## No bootstrap results found in results/. Run R/02_gof_bootstrap.R first.
 
 # Citation
 
