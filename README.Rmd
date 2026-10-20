@@ -1,0 +1,378 @@
+---
+title: "Goodness-of-Fit Tests for the r Largest Order Statistics Model: Venice Sea-Level Analysis"
+subtitle: "Code and results accompanying: *[Publication title, authors, journal, year]*"
+output:
+  github_document:
+    toc: true
+    toc_depth: 3
+    html_preview: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, message = FALSE, warning = FALSE,
+  fig.path = "figures/", dpi = 150, fig.width = 7, fig.height = 5
+)
+dir.create("figures", showWarnings = FALSE)
+dir.create("results", showWarnings = FALSE)
+```
+
+# Overview
+
+This repository contains the R code used to produce the Venice sea-level analysis in *[Publication title]*. It does three things:
+
+1.  Fits the **r largest order statistics** (r-largest) model to the annual Venice sea-level data (51 years, 1931--1981, 10 largest values per year) with several trend/cycle specifications for the location parameter.
+2.  Compares the nested models with **likelihood ratio tests** and plots the fitted location curves.
+3.  Implements a new **parametric-bootstrap goodness-of-fit routine** (`rlarg.test()`) that applies four statistics -- a probability-plot correlation, Kolmogorov--Smirnov (*D*), Cramér--von Mises (*W*), and Anderson--Darling (*A*) -- to each of the r order statistics.
+
+> **Note.** `README.md` is generated from `README.Rmd`. Edit the `.Rmd` and re-knit with `rmarkdown::render("README.Rmd")`; do not edit `README.md` by hand.
+
+## Repository structure
+
+```         
+.
+├── README.Rmd            # this document (source)
+├── README.md             # knitted output displayed on GitHub
+├── R/
+│   └── rlarg_test.R      # the rlarg.test() goodness-of-fit routine
+├── data/
+│   └── venice.rda        # Venice data (optional; also ships with ismev)
+├── results/              # bootstrap output, one file per random seed
+└── figures/              # figures generated when knitting
+```
+
+## Requirements {#requirements}
+
+```{r requirements, eval=FALSE}
+install.packages(c("ismev", "knitr", "rmarkdown", "dplyr"))
+```
+
+## Controlling run time
+
+The bootstrap goodness-of-fit calculations (`nsim = 5000`, three models, ten random seeds) take a long time, so they are **off by default** when knitting. The final summary reads previously saved files in `results/`. To re-run the simulations, set `run_gof <- TRUE` and choose a seed.
+
+```{r controls}
+run_gof <- FALSE   # TRUE re-runs the bootstrap (slow)
+nsim    <- 5000    # bootstrap replications per model
+seed0   <- 508     # update the seed each time you re-run (see "Summary across seeds")
+```
+
+# Data
+
+The data are the annual `venice` data set from the `ismev` package: the ten largest sea levels (cm) for each year 1931--1981. Some years have fewer than ten observations (missing values).
+
+```{r data}
+library(ismev)
+library(dplyr)
+if (file.exists("data/venice.rda")) load("data/venice.rda") else data(venice)
+venice <- venice %>% filter(year %in% 1931:1981)
+V2 <- venice[, 2:11]      # drop the Year column; keep the 10 order statistics
+dim(V2)
+head(V2)
+```
+
+## Ties
+
+Because the data are recorded to the nearest cm, ties among adjacent order statistics within a year are common. This matters for goodness-of-fit testing (see [Perturbing the data](#perturbing-the-data)).
+
+```{r ties}
+# number of ties between adjacent order statistics within a year
+sum(V2[, 1:9] == V2[2:10], na.rm = TRUE)
+```
+
+## Exploratory plot
+
+```{r order-stats, fig.cap="The ten largest sea levels per year, Venice 1931-1981."}
+matplot(1931:1981, as.matrix(V2), type = "l", lty = 1, col = grey.colors(10, end = 0.7),
+        xlab = "Year", ylab = "Sea level (cm)")
+lines(1931:1981, V2[, 1], lwd = 2)
+legend("topleft", legend = c("Annual maximum", "Order statistics 2-10"),
+       lwd = c(2, 1), col = c("black", "grey50"), bty = "n")
+```
+
+# Model fitting
+
+All models are fit with `ismev::rlarg.fit()` using $r = 10$ order statistics. The location parameter $\mu_t$ varies with time $t = 1, \dots, 51$; the scale and shape parameters are held constant.
+
+| Model | Location parameter $\mu_t$                       |
+|-------|--------------------------------------------------|
+| 1     | constant                                         |
+| 2     | linear trend in $t$                              |
+| 3     | quadratic trend in $t$                           |
+| 4     | linear trend + 18.62-year sinusoid (nodal cycle) |
+| 5     | linear trend + 11-year sinusoid (solar cycle)    |
+
+```{r fit-models, results="hide"}
+mod1 <- rlarg.fit(V2, r = 10, mul = NULL, sigl = NULL, shl = NULL,
+  mulink = identity, siglink = identity, shlink = identity,
+  muinit = mean(V2[, 1]), siginit = sqrt(var(V2[, 1])), shinit = -0.001,
+  show = FALSE, method = "Nelder-Mead", maxit = 10000)
+
+mod2 <- rlarg.fit(V2, r = 10, ydat = matrix((1:51), ncol = 1), mul = 1,
+  sigl = NULL, shl = NULL,
+  mulink = identity, siglink = identity, shlink = identity,
+  muinit = c(mean(V2[, 1]), 0), siginit = sqrt(var(V2[, 1])), shinit = -0.001,
+  show = FALSE, method = "Nelder-Mead", maxit = 10000)
+
+mod3 <- rlarg.fit(V2, r = 10,
+  ydat = matrix(c((1:51), (1:51)^2), ncol = 2), mul = 1:2,
+  sigl = NULL, shl = NULL,
+  mulink = identity, siglink = identity, shlink = identity,
+  muinit = c(mean(V2[, 1]), 0, 0), siginit = sqrt(var(V2[, 1])), shinit = -0.001,
+  show = FALSE, method = "Nelder-Mead", maxit = 10000)
+
+mod4 <- rlarg.fit(V2, r = 10,
+  ydat = matrix(c((1:51), cos(2*pi*(1:51)/18.62), sin(2*pi*(1:51)/18.62)), ncol = 3),
+  mul = 1:3, sigl = NULL, shl = NULL,
+  mulink = identity, siglink = identity, shlink = identity,
+  muinit = c(mean(V2[, 1]), 0, 0, 0), siginit = sqrt(var(V2[, 1])), shinit = -0.001,
+  show = FALSE, method = "Nelder-Mead", maxit = 10000)
+
+mod5 <- rlarg.fit(V2, r = 10,
+  ydat = matrix(c((1:51), cos(2*pi*(1:51)/11), sin(2*pi*(1:51)/11)), ncol = 3),
+  mul = 1:3, sigl = NULL, shl = NULL,
+  mulink = identity, siglink = identity, shlink = identity,
+  muinit = c(mean(V2[, 1]), 0, 0, 0), siginit = sqrt(var(V2[, 1])), shinit = -0.001,
+  show = FALSE, method = "Nelder-Mead", maxit = 10000)
+```
+
+## Parameter estimates (Model 2: linear trend)
+
+```{r param-table}
+tab1 <- round(cbind(mod2$mle, mod2$se, mod2$mle / mod2$se,
+                    2 * pnorm(-abs(mod2$mle / mod2$se))), 4)
+dimnames(tab1) <- list(c("mu (intercept)", "mu (trend)", "sigma", "xi"),
+                       c("Estimate", "Std. error", "z", "p-value"))
+knitr::kable(tab1)
+```
+
+## Negative log-likelihoods
+
+```{r nllh}
+nllh <- c(mod1$nllh, mod2$nllh, mod3$nllh, mod4$nllh, mod5$nllh)
+knitr::kable(data.frame(Model = 1:5, `Negative log-likelihood` = round(nllh, 2),
+                        check.names = FALSE))
+```
+
+# Likelihood ratio tests
+
+Tests of each larger model against its simpler counterpart.
+
+```{r lrt}
+D1 <- 2 * (mod1$nllh - mod2$nllh)   # trend vs. constant      (1 df)
+D2 <- 2 * (mod2$nllh - mod3$nllh)   # quadratic vs. linear    (1 df)
+D3 <- 2 * (mod2$nllh - mod4$nllh)   # + 18.62-year cycle      (2 df)
+D4 <- 2 * (mod2$nllh - mod5$nllh)   # + 11-year cycle         (2 df)
+
+lrt <- data.frame(
+  Comparison = c("2 vs 1 (linear trend)", "3 vs 2 (quadratic term)",
+                 "4 vs 2 (18.62-yr cycle)", "5 vs 2 (11-yr cycle)"),
+  Deviance   = round(c(D1, D2, D3, D4), 3),
+  df         = c(1, 1, 2, 2),
+  `p-value`  = signif(c(pchisq(D1, 1, lower.tail = FALSE),
+                        pchisq(D2, 1, lower.tail = FALSE),
+                        pchisq(D3, 2, lower.tail = FALSE),
+                        pchisq(D4, 2, lower.tail = FALSE)), 3),
+  check.names = FALSE)
+knitr::kable(lrt)
+```
+
+# Fitted location curves
+
+Fitted location curves for annual maxima under Models 2, 3 and 5. The predictions are shifted from the GEV-type location parameter $\mu_t$ to the **median** of the annual maximum, $\mu_t + \sigma(\log 2^{-\xi} - 1)/\xi$.
+
+```{r fitted-curves, fig.cap="Annual maxima with fitted median curves: linear (solid), quadratic (dotted), linear + 11-year cycle (dashed)."}
+pred2 <- matrix(c(rep(1, 51), (1:51), rep(0, 51), rep(0, 51)), ncol = 4) %*% mod2$mle +
+  (mod2$mle[3] * (log(2)^(-mod2$mle[4]) - 1) / mod2$mle[4])
+
+pred3 <- matrix(c(rep(1, 51), (1:51), (1:51)^2, rep(0, 51), rep(0, 51)), ncol = 5) %*% mod3$mle +
+  (mod3$mle[4] * (log(2)^(-mod3$mle[5]) - 1) / mod3$mle[5])
+
+pred5 <- matrix(c(rep(1, 51), (1:51), cos(2*pi*(1:51)/11), sin(2*pi*(1:51)/11),
+                  rep(0, 51), rep(0, 51)), ncol = 6) %*% mod5$mle +
+  (mod5$mle[5] * (log(2)^(-mod5$mle[6]) - 1) / mod5$mle[6])
+
+par(mfrow = c(1, 1), cex = 1.3)
+plot(1931:1981, V2[, 1], xlab = "Year", ylab = "Annual Max", pch = "*")
+lines(1931:1981, pred2, lty = 1)
+lines(1931:1981, pred3, lty = 3)
+lines(1931:1981, pred5, lty = 2)
+legend("topleft", legend = c("Model 2", "Model 3", "Model 5"),
+       lty = c(1, 3, 2), bty = "n", cex = 0.7)
+```
+
+# Standard `ismev` diagnostics
+
+These are the built-in diagnostics for Model 2 (not used in the paper). They are included for completeness.
+
+```{r ismev-diag, fig.height=8, fig.cap="ismev diagnostics for the linear-trend model."}
+rlarg.diag(mod2)
+```
+
+# Goodness-of-fit tests
+
+## The `rlarg.test()` function
+
+`rlarg.test()` fits the model, computes four goodness-of-fit statistics on each of the $r$ order statistics, and obtains bootstrap p-values by simulating from the fitted model `nsim` times and refitting each simulated data set. The returned matrix has $r$ rows (order statistics 1 to $r$) and 8 columns:
+
+| Columns | Content |
+|------------------------------------|------------------------------------|
+| 1--4 | Observed statistics: probability-plot correlation (**lg**), Kolmogorov--Smirnov (**D**), Cramér--von Mises (**W**), Anderson--Darling (**A**) |
+| 5--8 | Bootstrap p-values for the same four statistics |
+
+The source is in [`R/rlarg_test.R`](R/rlarg_test.R) and is shown below.
+
+```{r rlarg-test, code=readLines("R/rlarg_test.R")}
+```
+
+## Perturbing the data {#perturbing-the-data}
+
+The Venice data contain many ties (87 between adjacent order statistics), and the goodness-of-fit methods cannot be applied directly. We therefore perturb each value by uniform noise on $(-0.5, 0.5)$ -- the rounding interval -- and re-sort within each year.
+
+> **Warning.** Because of the large number of ties, the resulting GoF statistics differ from run to run. The entire calculation was therefore repeated **10 times with different seeds** and the p-values averaged (see [Summary across seeds](#summary-across-seeds)).
+
+```{r perturb}
+V3 <- V2
+set.seed(seed0)
+for (i in 1:51) {
+  rr <- 10
+  if (i == 5) rr <- 6                       # year 5 has only 6 observations
+  V3[i, 1:rr] <- V2[i, 1:rr] - 0.5 + runif(rr)
+  V3[i, 1:rr] <- sort(as.numeric(V3[i, 1:rr]), decreasing = TRUE)
+}
+```
+
+## Running the bootstrap
+
+Three models are tested: Model 7 (constant location), Model 8 (linear trend) and Model 9 (linear trend plus 11-year cycle).
+
+```{r gof-run, eval=run_gof}
+T1 <- Sys.time()
+mod7 <- rlarg.test(V3, r = 10, ydat = matrix((1:51), ncol = 1),
+  mul = NULL, sigl = NULL, shl = NULL,
+  mulink = identity, siglink = identity, shlink = identity,
+  muinit = mean(V3[, 1]), siginit = sqrt(var(V3[, 1])), shinit = -0.001,
+  show = FALSE, method = "Nelder-Mead", maxit = 10000, nsim = nsim)
+print(Sys.time() - T1)
+sum(mod7[, 5:8] < 0.05)
+
+T1 <- Sys.time()
+mod8 <- rlarg.test(V3, r = 10, ydat = matrix((1:51), ncol = 1),
+  mul = 1, sigl = NULL, shl = NULL,
+  mulink = identity, siglink = identity, shlink = identity,
+  muinit = c(mean(V2[, 1]), 0), siginit = sqrt(var(V2[, 1])), shinit = -0.001,
+  show = FALSE, method = "Nelder-Mead", maxit = 10000, nsim = nsim)
+print(Sys.time() - T1)
+sum(mod8[, 5:8] < 0.05)
+
+T1 <- Sys.time()
+mod9 <- rlarg.test(V3, r = 10,
+  ydat = matrix(c((1:51), cos(2*pi*(1:51)/11), sin(2*pi*(1:51)/11)), ncol = 3),
+  mul = 1:3, sigl = NULL, shl = NULL,
+  mulink = identity, siglink = identity, shlink = identity,
+  muinit = c(mean(V2[, 1]), 0, 0, 0), siginit = sqrt(var(V2[, 1])), shinit = -0.001,
+  show = FALSE, method = "Nelder-Mead", maxit = 10000, nsim = nsim)
+print(Sys.time() - T1)
+sum(mod9[, 5:8] < 0.05)
+
+# save results for this seed (30 rows x 8 columns: models 7, 8, 9 stacked)
+modall <- rbind(mod7, mod8, mod9)
+write(t(modall), file.path("results", paste0("Results", seed0, ".txt")), ncol = 8)
+```
+
+# Summary across seeds {#summary-across-seeds}
+
+Results from the ten runs (seeds 123, 234, 501--508) are stored in `results/`. The p-values are averaged across runs.
+
+```{r gof-summary}
+fn <- file.path("results", c("Results123.txt", "Results234.txt", "Results501.txt",
+  "Results502.txt", "Results503.txt", "Results504.txt", "Results505.txt",
+  "Results506.txt", "Results507.txt", "Results508.txt"))
+fn <- fn[file.exists(fn)]
+
+if (length(fn) == 0) {
+  cat("No result files found in results/. Set run_gof <- TRUE and re-knit, or add the saved Results*.txt files.")
+} else {
+  cat("Averaging over", length(fn), "run(s).\n")
+  mod7all <- mod8all <- mod9all <- 0
+  for (f in fn) {
+    M <- matrix(scan(f, quiet = TRUE), ncol = 8, byrow = TRUE)
+    mod7all <- mod7all + M[1:10,  5:8]
+    mod8all <- mod8all + M[11:20, 5:8]
+    mod9all <- mod9all + M[21:30, 5:8]
+  }
+  mod7all <- mod7all / length(fn)
+  mod8all <- mod8all / length(fn)
+  mod9all <- mod9all / length(fn)
+
+  # number of p-values below 0.05 (out of 40 per model)
+  c(`Model 7` = sum(mod7all < 0.05),
+    `Model 8` = sum(mod8all < 0.05),
+    `Model 9` = sum(mod9all < 0.05))
+}
+```
+
+## Table of averaged p-values
+
+Rows are the order statistics $k = 1, \dots, 10$. Columns give the p-value for the correlation (**R**), Kolmogorov--Smirnov (**KS**), Cramér--von Mises (**CvM**) and Anderson--Darling (**AD**) statistics.
+
+```{r gof-table, eval=length(fn) > 0}
+nm <- c("R", "KS", "CvM", "AD")
+tab <- data.frame(k = 1:10,
+                  signif(mod7all, 2), signif(mod8all, 2), signif(mod9all, 2))
+names(tab) <- c("k", paste0("M7.", nm), paste0("M8.", nm), paste0("M9.", nm))
+knitr::kable(tab, align = "c")
+```
+
+## Figure: p-values by order statistic
+
+```{r gof-plot, eval=length(fn) > 0, fig.width=9, fig.height=4, fig.cap="Averaged bootstrap p-values for each order statistic. The dashed line marks 0.05."}
+par(mfrow = c(1, 3), mar = c(4, 4, 3, 1))
+res <- list(`Model 7: constant` = mod7all,
+            `Model 8: linear trend` = mod8all,
+            `Model 9: trend + 11-yr cycle` = mod9all)
+for (nmod in names(res)) {
+  matplot(1:10, res[[nmod]], type = "b", pch = 1:4, lty = 1, col = 1:4,
+          ylim = c(0, 1), xlab = "Order statistic k", ylab = "p-value", main = nmod)
+  abline(h = 0.05, lty = 2)
+}
+legend("bottomright", legend = nm, pch = 1:4, col = 1:4, lty = 1, bty = "n", cex = 0.8)
+```
+
+## LaTeX-ready table (optional)
+
+This produces rows that can be pasted straight into a LaTeX `tabular`.
+
+```{r latex, eval=FALSE}
+for (i in 1:10) {
+  print(paste0(
+    signif(mod7all, 2)[i, 1], "&", signif(mod7all, 2)[i, 2], "&",
+    signif(mod7all, 2)[i, 3], "&", signif(mod7all, 2)[i, 4], "&",
+    signif(mod8all, 2)[i, 1], "&", signif(mod8all, 2)[i, 2], "&",
+    signif(mod8all, 2)[i, 3], "&", signif(mod8all, 2)[i, 4], "&",
+    signif(mod9all, 2)[i, 1], "&", signif(mod9all, 2)[i, 2], "&",
+    signif(mod9all, 2)[i, 3], "&", signif(mod9all, 2)[i, 4], "\\\\"))
+}
+```
+
+# Reproducing the paper's results
+
+1.  Install the required packages (see [Requirements](#requirements)).
+2.  Knit this file for the model fits, tests, and figures: `rmarkdown::render("README.Rmd")`.
+3.  To regenerate the bootstrap results, set `run_gof <- TRUE` in the `controls` chunk, set `seed0` to a new value, and re-knit. Repeat with ten different seeds, keeping the `Results<seed>.txt` files in `results/` (add the new file names to the `fn` vector in the summary chunk).
+
+# Session information
+
+```{r session-info}
+sessionInfo()
+```
+
+# Citation
+
+If you use this code, please cite:
+
+> [Authors]. ([Year]). *[Publication title]*. [Journal], [volume](%5Bissue%5D), [pages]. [DOI]
+
+# License
+
+[Add license information, e.g. MIT.]
