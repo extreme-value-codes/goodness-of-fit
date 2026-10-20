@@ -1,2 +1,3 @@
-# goodness_of_fit
-Goodness-of-fit testing for the r-largest order statistics method in extreme value theory, using simulation-based tests and applications to Venice sea-level and marathon record data.
+# gof-GEV
+The goal of gof-GEV is to replicate the visualizations and tables within the publication “Goodness of Fit for the r-Largest Order Statistics Method in
+Extreme Value Theory”.
